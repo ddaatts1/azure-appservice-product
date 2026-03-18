@@ -1,63 +1,82 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 
+# Tên của workflow, hiển thị trên tab Actions của GitHub
 name: Build and deploy JAR app to Azure Web App - productdatdt
 
+# Định nghĩa các sự kiện kích hoạt workflow
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - main          # Tự động chạy khi có code được push lên nhánh main
+  workflow_dispatch:  # Cho phép chạy thủ công từ giao diện GitHub Actions
 
+# Định nghĩa các jobs (công việc) trong workflow
 jobs:
+
+  # ==================== JOB 1: BUILD ====================
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Chạy trên máy ảo Ubuntu mới nhất do GitHub cung cấp
+
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read  # Chỉ cấp quyền đọc repo, không cho phép ghi (bảo mật tối thiểu)
 
     steps:
+      # Bước 1: Checkout source code từ repository về máy ảo
       - uses: actions/checkout@v4
 
+      # Bước 2: Cài đặt Java 17 (Microsoft distribution) để build project
       - name: Set up Java version
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'microsoft'
+          java-version: '17'          # Phiên bản Java cần dùng
+          distribution: 'microsoft'   # Dùng bản phân phối Java của Microsoft (Microsoft OpenJDK)
 
+      # Bước 3: Build project bằng Maven
+      # - clean: xóa thư mục target cũ
+      # - install: compile, test và đóng gói thành file JAR
       - name: Build with Maven
         run: mvn clean install
 
+      # Bước 4: Upload file JAR vừa build lên GitHub Artifacts
+      # để job deploy ở bên dưới có thể tải xuống và sử dụng
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
-          name: java-app
-          path: '${{ github.workspace }}/target/*.jar'
+          name: java-app                              # Tên artifact để nhận diện
+          path: '${{ github.workspace }}/target/*.jar' # Đường dẫn đến file JAR trong thư mục target
 
+  # ==================== JOB 2: DEPLOY ====================
   deploy:
-    runs-on: ubuntu-latest
-    needs: build
+    runs-on: ubuntu-latest  # Chạy trên máy ảo Ubuntu mới nhất
+
+    needs: build  # Job này phải chờ job "build" hoàn thành thành công mới chạy
+
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
-  
+      id-token: write  # Bắt buộc để xác thực với Azure bằng OIDC (không cần lưu secret password)
+      contents: read   # Bắt buộc để actions/checkout có thể đọc repo
+
     steps:
+      # Bước 1: Tải file JAR đã được upload từ job build xuống
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: java-app
-      
+          name: java-app  # Phải trùng tên với artifact đã upload ở job build
+
+      # Bước 2: Đăng nhập vào Azure bằng Service Principal (xác thực OIDC)
+      # Các giá trị được lấy từ GitHub Secrets để bảo mật, không hardcode trực tiếp
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_78A5FD828283498189722ACB68A05765 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5E42FC4F9B3F4791B10C7B670C0A3ED7 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_360AD2D51EE248579B86FF2E5BE25B16 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_78A5FD828283498189722ACB68A05765 }}         # ID của ứng dụng đã đăng ký trên Azure AD
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5E42FC4F9B3F4791B10C7B670C0A3ED7 }}         # ID của Azure tenant (tổ chức)
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_360AD2D51EE248579B86FF2E5BE25B16 }} # ID của Azure subscription
 
+      # Bước 3: Deploy file JAR lên Azure App Service
       - name: Deploy to Azure Web App
-        id: deploy-to-webapp
+        id: deploy-to-webapp       # Đặt ID để có thể tham chiếu output của bước này nếu cần
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'productdatdt'
-          slot-name: 'Production'
-          package: '**/*.jar'
-          
+          app-name: 'productdatdt'  # Tên Azure Web App sẽ được deploy lên
+          slot-name: 'Production'   # Deploy vào slot Production (môi trường chính thức)
+          package: '**/*.jar'       # Tìm và deploy tất cả file .jar trong thư mục hiện tại
